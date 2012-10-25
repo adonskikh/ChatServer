@@ -19,6 +19,8 @@ struct Message
 {
     char sender[32];
     char text[1024];
+    char text1[32000];
+    char text2[30000];
 };
 
 struct Task
@@ -192,7 +194,7 @@ int main()
                 struct Task inf;// новое задание
                 if (events[n].events & EPOLLIN)// Поступили данные от клиента, читаем их
                 {                    
-                    bytes_read = recv(fd, &(inf.message), sizeof(inf.message), 0);
+                    bytes_read = recv(fd, &(inf.message), sizeof(inf.message), MSG_WAITALL);
 					//здесь Лысачев сказал добавить проверку, что bytes_read == sizeof(inf.message), если нет, то продолжать читать недостающие байты
                     if(bytes_read <= 0) // Соединение разорвано, удаляем сокет из epoll и множества
                     {
@@ -202,7 +204,7 @@ int main()
                         clients.erase(fd);
                         continue;
                     }
-					
+                    printf("Read %d of %d bytes.\n", bytes_read, sizeof(inf.message));
 					//заполняем задание
                     inf.finish = false;
                     inf.clientfd = fd;
