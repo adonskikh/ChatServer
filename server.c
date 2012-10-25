@@ -198,19 +198,18 @@ int main()
                     while(bytes_left > 0)
                     {
                         //printf("addr = %d\n", (int)(&(inf.message) + bytes_read));
-                        int n = recv(fd, buf + /*&(inf.message)*/ + bytes_read, bytes_left, 0);
-                        if(n > 0)
+                        int bytes = recv(fd, buf + /*&(inf.message)*/ + bytes_read, bytes_left, 0);
+                        if(bytes > 0)
                         {
-                            bytes_read += n;
-                            bytes_left -= n;
-                            printf("bytes_read = %d\n", bytes_read);
-                            printf("bytes_left = %d\n", bytes_left);
+                            bytes_read += bytes;
+                            bytes_left -= bytes;
+                            printf("bytes_read: %d bytes_left: %d\n", bytes_read, bytes_left);
                         }
-                        if(n < 0)
+                        if(bytes < 0)
                             perror("recv");/*
                         printf("n = %d\n", n);*/
 
-                        if(n == 0) // Соединение разорвано, удаляем сокет из epoll и множества
+                        if(bytes == 0) // Соединение разорвано, удаляем сокет из epoll и множества
                         {
                             epoll_ctl(efd, EPOLL_CTL_DEL, fd, &connev);
                             --events_count;
@@ -252,6 +251,13 @@ int main()
             }
         }
     }
+
+    void *status;
+    for(i=0; i<thread_count; i++)//Waiting for threads
+    {
+        pthread_join(threads[i], &status);
+    }
+    free(threads);
 
     pthread_mutex_destroy(&mutex);
 

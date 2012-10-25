@@ -3,6 +3,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include<pthread.h>
+#include<stdbool.h>
+#include <fcntl.h>
 
 
 struct Message
@@ -19,20 +22,50 @@ struct Message
     char text8[32000];*/
 };
 
+struct Inf
+{
+    int socket;
+    bool *finish;
+};
+
 //char buf[sizeof(text)];
+
+void* ThreadProc(void *data)
+{
+    struct Inf inf = *((struct Inf *)data);
+    struct Message message;
+    while(!(*(inf.finish)))
+    {
+        char buf[sizeof(message)];
+        int bytes_read = 0;
+        int bytes_left = sizeof(message);
+
+        while(bytes_left > 0 && !(*(inf.finish)))
+        {
+            int bytes = recv(inf.socket, buf + bytes_read, bytes_left, 0);
+            if(bytes > 0)
+            {
+                bytes_read += bytes;
+                bytes_left -= bytes;
+                printf("bytes_read: %d bytes_left: %d\n", bytes_read, bytes_left);
+            }
+        }
+
+        if (bytes_left > 0)
+        {
+            continue;
+        }
+
+        message = *((struct Message *)(buf));
+
+        printf("[%s]: %s\n", message.sender, message.text);
+    }
+    pthread_exit(NULL);
+}
 
 int main(int argc, char *argv[])
 {
     int i = 0;
-    //int count = 3;
-    int pid;
-    /*for (i = 0; i < count - 1; i++)
-    {
-        pid = fork();
-        if(pid == 0)//Child
-            break;
-    }*/
-
     int sock;
     struct sockaddr_in addr;
 
@@ -52,6 +85,19 @@ int main(int argc, char *argv[])
         exit(2);
     }
 
+    fcntl(sock, F_SETFL, O_NONBLOCK); //назначение сокета неблокирующим
+
+    pthread_t thr;
+
+    struct Inf inf;
+    inf.socket = sock;
+    bool finish = false;
+    inf.finish = &finish;
+
+    if(pthread_create(&thr, NULL, ThreadProc, (void*)(&inf)))
+        printf("Thread creation error!\n");
+
+
     int count = atoi(argv[1]);
     while(i < count)
     {
@@ -60,24 +106,30 @@ int main(int argc, char *argv[])
         int size;
         size = sprintf(message.text, "%s", "Hello! This is ");
         size +=  sprintf(message.text + size, "%i", getpid());
-        size +=  sprintf(message.text + size, "%s", "\n");
+        //size +=  sprintf(message.text + size, "%s", "\n");
 
         size = sprintf(message.sender, "%i", getpid());
 
 
-        printf("Process sending message: %s\n", message.text);
+        printf(">Process sending message: %s<\n", message.text);
         int n = send(sock, &message, sizeof(message), 0);
-        printf("Sent %d of %d bytes\n", n, sizeof(message));
-        recv(sock, &message, sizeof(message), 0);
 
-        /*size = sprintf(text, "%i", getpid());
-            size += sprintf(text + size, "%s", " recieved message: ");
-            size += sprintf(text + size, "%s", buf);
-            printf(text);*/
-        printf("%s: %s\n", message.sender, message.text);
+        if (n == 0)
+        {
+            printf("Server closed connection\n");
+            break;
+        }
+
         i++;
     }
+
+    finish = true;
+    void *status;
+    pthread_join(thr, &status);
+
     close(sock);
+
+
 
     return 0;
 }
