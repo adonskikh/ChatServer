@@ -12,13 +12,15 @@
 #include<pthread.h>
 using namespace std;
 
+#define NAME_LENGTH 32
+#define MESSAGE_LENGTH 1024
 
 pthread_mutex_t mutex;
 
 struct Message
 {
-    char sender[32];
-    char text[1024];
+    char sender[NAME_LENGTH];
+    char text[MESSAGE_LENGTH];
     char text1[32000];
     char text2[30000];
 };
@@ -57,7 +59,7 @@ int main()
     int listenfd;
     struct sockaddr_in addr;
     int threads_count = 4;
-    //char buf[1024];
+    //char buf[MESSAGE_LENGTH];
 
     const int MAX_EPOLL_EVENTS = 100;
     const int BACK_LOG = 100;
@@ -253,7 +255,7 @@ int main()
     }
 
     void *status;
-    for(i=0; i<thread_count; i++)//Waiting for threads
+    for(i=0; i<threads_count; i++)//Waiting for threads
     {
         pthread_join(threads[i], &status);
     }

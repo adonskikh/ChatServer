@@ -7,11 +7,13 @@
 #include<stdbool.h>
 #include <fcntl.h>
 
+#define NAME_LENGTH 32
+#define MESSAGE_LENGTH 1024
 
 struct Message
 {
-    char sender[32];
-    char text[1024];
+    char sender[NAME_LENGTH];
+    char text[MESSAGE_LENGTH];
     char text1[32000];
     char text2[30000];
     /*char text3[32000];
@@ -30,7 +32,7 @@ struct Inf
 
 //char buf[sizeof(text)];
 
-void* ThreadProc(void *data)
+void* Reader(void *data)
 {
     struct Inf inf = *((struct Inf *)data);
     struct Message message;
@@ -94,7 +96,7 @@ int main(int argc, char *argv[])
     bool finish = false;
     inf.finish = &finish;
 
-    if(pthread_create(&thr, NULL, ThreadProc, (void*)(&inf)))
+    if(pthread_create(&thr, NULL, Reader, (void*)(&inf)))
         printf("Thread creation error!\n");
 
 
