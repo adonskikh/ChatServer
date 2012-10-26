@@ -134,7 +134,6 @@ void* Reader(void *data)
 
         if (bytes_left > 0)
         {
-            printf("continue\n");
             continue;
         }
 
@@ -233,7 +232,7 @@ int main(/*int argc, char *argv[]*/)
                 *pos = '\0';
             paused = true;
             printf("[paused]");
-            if(strcmp(command, "x") == 0)
+            if(strcmp(command, "stop") == 0)
             {
                 finish = true;
             }

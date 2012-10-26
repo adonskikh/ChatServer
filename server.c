@@ -6,16 +6,16 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
-//#include <algorithm> //для max
 #include <sys/epoll.h>
-#include <set>
 #include<pthread.h>
-using namespace std;
+#include<stdbool.h>
+#include <string.h>
 
 #define NAME_LENGTH 32
 #define MESSAGE_LENGTH 1024
 
 pthread_mutex_t mutex;
+pthread_mutex_t pipe_mutex;
 
 struct Message
 {
@@ -28,38 +28,154 @@ struct Message
 struct Task
 {
     int clientfd;
-    set<int> *clients;
+    struct List *clients;
     struct Message message;
     int message_size;
     bool finish;
 };
 
-void* ThreadProc(void *data)
+struct ServerData
+{
+    int threads_count;
+    bool *finish;
+    bool *inf_mode;
+};
+
+struct ListElement
+{
+    int value;
+    struct ListElement *next;
+};
+
+struct List
+{
+    int count;
+    struct ListElement *first;
+    struct ListElement *last;
+};
+
+bool ListIsEmpty(struct List *list)
+{
+    return((list->count) < 1);
+}
+
+void AddToList(struct List *list, int value)
+{
+    pthread_mutex_lock(&mutex);
+    struct ListElement *element = malloc(sizeof(struct ListElement));
+    element->value = value;
+    element->next = NULL;
+    if(ListIsEmpty(list))
+    {
+        list->first = element;
+        list->last = element;
+    }
+    else
+    {
+        list->last->next = element;
+        list->last = element;
+    }
+    (list->count)++;
+    pthread_mutex_unlock(&mutex);
+}
+
+void RemoveFromList(struct List *list, int value)
+{
+    pthread_mutex_lock(&mutex);
+    if(!ListIsEmpty(list))
+    {
+        struct ListElement *element = list->first;
+        struct ListElement *found_element = NULL;
+        if(element->value == value)
+        {
+            found_element = element;
+            list->first = element->next;
+            (list->count)--;
+            free(found_element);
+        }
+        else
+            while(element->next != NULL)
+            {
+                if (element->next->value == value)
+                {
+                    found_element = element->next;
+                    if(found_element == list->last)
+                        list->last = element;
+                    element->next = found_element->next;
+                    (list->count)--;
+                    free(found_element);
+                    break;
+                }
+                else
+                    element = element->next;
+            }
+    }
+    pthread_mutex_unlock(&mutex);
+}
+
+void ClearList(struct List *list)
+{
+    pthread_mutex_lock(&mutex);
+    if(!ListIsEmpty(list))
+    {
+        struct ListElement *element = list->first;
+        struct ListElement *current_element = NULL;
+        while(element != NULL)
+        {
+            current_element = element;
+            element = element->next;
+            (list->count)--;
+            free(current_element);
+        }
+    }
+    pthread_mutex_unlock(&mutex);
+}
+
+void InitializeList(struct List *list)
+{
+    list->count = 0;
+    list->first = NULL;
+    list->last = NULL;
+}
+
+
+void* Broadcast(void *data)
 {
     int pipe_read_fd = *((int *)data);
     struct Task task;
     while(1)
     {
-        read(pipe_read_fd, &task, sizeof(Task));
+        pthread_mutex_lock(&pipe_mutex);
+        read(pipe_read_fd, &task, sizeof(task));
+        pthread_mutex_unlock(&pipe_mutex);
+        //printf("read task\n");
         if (task.finish)
-            break;
-        for(set<int>::iterator it = (*(task.clients)).begin(); it != (*(task.clients)).end(); it++)//отправляем сообщение всем подключенным клиентам, кроме отправителя
         {
-            //printf("client: %d\n", *it);
-            if((*it) != task.clientfd)
-                send(*it, &(task.message), task.message_size, 0);
+            printf("Thread finished\n");
+            break;
         }
+
+        pthread_mutex_lock(&mutex);
+        struct ListElement *element = task.clients->first;
+        while(element != NULL)//отправляем сообщение всем подключенным клиентам, кроме отправителя
+        {
+            if((element->value) != task.clientfd)
+                send(element->value, &(task.message), task.message_size, 0);
+            element = element->next;
+        }
+        pthread_mutex_unlock(&mutex);
     }
-    pthread_exit(NULL);
+    return NULL;
 }
 
-
-int main()
+void* Server(void *data)
 {
+    printf("Server started\n");
+    printf("Commands: stop, inf\n");
     int listenfd;
     struct sockaddr_in addr;
-    int threads_count = 4;
-    //char buf[MESSAGE_LENGTH];
+    struct ServerData server_data = *((struct ServerData *)data);
+    int threads_count = server_data.threads_count;
 
     const int MAX_EPOLL_EVENTS = 100;
     const int BACK_LOG = 100;
@@ -84,8 +200,8 @@ int main()
 
     listen(listenfd, BACK_LOG); //перевод сервера в режим ожидания запросов
 
-    set<int> clients; //множество дескрипторов сокетов подключенных клиентов
-    clients.clear();
+    struct List list;//список дескрипторов сокетов подключенных клиентов
+    InitializeList(&list);
 
 
 
@@ -99,11 +215,11 @@ int main()
     if (epoll_ctl(efd, EPOLL_CTL_ADD, listenfd, &listenev) < 0) //теперь epoll следит за наступлением указанных событий для сокета listenfd
     {
         perror("Epoll fd add");
-        return -1;
+        return;
     }
 
     socklen_t client;
-	
+
     struct epoll_event events[MAX_EPOLL_EVENTS]; //структуры epoll_event для всех наступивших событий
     struct epoll_event connev;
     struct sockaddr_in cliaddr; //структура для сохранения в ней адреса подключаемого клиента
@@ -123,34 +239,41 @@ int main()
 
     int i;
 
-
-    pthread_mutex_init(&mutex, NULL);
-
     pthread_t *threads = (pthread_t *)malloc(sizeof(pthread_t) * threads_count);
     for(i = 0; i < threads_count; i++)
     {
-        printf("Creating thread %d\n", i);
+        if(*(server_data.inf_mode))
+            printf("Creating thread %d\n", i);
 
-        int error = pthread_create(&(threads[i]), NULL, ThreadProc, (void*)(&pipe_read_fd));
+        int error = pthread_create(&(threads[i]), NULL, Broadcast, (void*)(&pipe_read_fd));
 
         if(error)
             printf("Thread creation error!\n");
-    }	
-    //Работу сервера (этот цикл while) вынести в отдельную нить/процесс, а главная нить будет в бесконечном цикле спрашивать у пользователя команды (информация о сервере, завершение работы и т.п.)
-    while(1)
+    }
+
+    while(!*(server_data.finish))
     {
         // Блокирование до готовности одного или нескольких дескрипторов
-        int nfds = epoll_wait(efd, events, MAX_EPOLL_EVENTS, -1);//когда наступает хотя бы одно событие, функция возвращает число наступивших событий, а их структуры записывает в events
+        int nfds = epoll_wait(efd, events, MAX_EPOLL_EVENTS, /*timeout*/1000);//когда наступает хотя бы одно событие, функция возвращает число наступивших событий, а их структуры записывает в events
+        if(nfds < 1)
+            continue;
 
         //Вывод списка клиентов
-        printf("====================================================\n");
-        for(set<int>::iterator it = clients.begin(); it != clients.end(); it++)
+        if(*(server_data.inf_mode))
         {
-            printf("client: %d\n", *it);
+            pthread_mutex_lock(&mutex);
+            printf("========================Connected clients========================\n");
+            struct ListElement *element = list.first;
+            while(element != NULL)
+            {
+                printf("client %d\n", element->value);
+                element = element->next;
+            }
+            pthread_mutex_unlock(&mutex);
         }
 
-
-        for (int n = 0; n < nfds; ++n)
+        int n;
+        for (n = 0; n < nfds; ++n)
         {
             if (events[n].data.fd == listenfd)// Готов слушающий дескриптор
             {
@@ -162,7 +285,7 @@ int main()
                     continue;
                 }
 
-                
+
                 if (events_count == MAX_EPOLL_EVENTS-1)// Недостаточно места в массиве ожидания, закрываем соединение
                 {
                     printf("Event array is full\n");
@@ -180,7 +303,7 @@ int main()
                     close(connfd);
                     continue;
                 }
-                clients.insert(connfd); // Добавляем сокет во множество клиентов
+                AddToList(&list, connfd);// Добавляем сокет в список клиентов
 
                 ++events_count;
             }
@@ -193,48 +316,46 @@ int main()
                 // новое задание
                 if (events[n].events & EPOLLIN)// Поступили данные от клиента, читаем их
                 {
-                    char buf[sizeof(Message)];
+                    char buf[sizeof(struct Message)];
                     int bytes_read = 0;
-                    int bytes_left = sizeof(Message);
+                    int bytes_left = sizeof(struct Message);
 
-                    while(bytes_left > 0)
+                    while(bytes_left > 0 && !*(server_data.finish))
                     {
-                        //printf("addr = %d\n", (int)(&(inf.message) + bytes_read));
-                        int bytes = recv(fd, buf + /*&(inf.message)*/ + bytes_read, bytes_left, 0);
+                        int bytes = recv(fd, buf + bytes_read, bytes_left, 0);
                         if(bytes > 0)
                         {
                             bytes_read += bytes;
                             bytes_left -= bytes;
-                            printf("bytes_read: %d bytes_left: %d\n", bytes_read, bytes_left);
+                            if(*(server_data.inf_mode))
+                                printf("bytes_read: %d bytes_left: %d\n", bytes_read, bytes_left);
                         }
-                        if(bytes < 0)
-                            perror("recv");/*
-                        printf("n = %d\n", n);*/
 
-                        if(bytes == 0) // Соединение разорвано, удаляем сокет из epoll и множества
+                        if(bytes == 0) // Соединение разорвано, удаляем сокет из epoll и списка
                         {
                             epoll_ctl(efd, EPOLL_CTL_DEL, fd, &connev);
                             --events_count;
                             close(fd);
-                            clients.erase(fd);
+                            RemoveFromList(&list, fd);
                             break;
                         }
                     }
                     if (bytes_left > 0)
                     {
-                        printf("Reading error\n");
                         continue;
                     }
 
-                    printf("Read %d of %d bytes.\n", bytes_read, sizeof(Message));
+
+                    if(*(server_data.inf_mode))
+                        printf("Read %d of %d bytes.\n", bytes_read, sizeof(struct Message));
                     //заполняем задание
                     struct Task inf;
                     inf.finish = false;
                     inf.clientfd = fd;
-                    inf.message = *((struct Message *)(/*(void *)*/buf));
+                    inf.message = *((struct Message *)buf);
                     inf.message_size = bytes_read;
-                    inf.clients = &clients;
-                    write(pipe_write_fd, &inf, sizeof(Task));//записываем задание в канал
+                    inf.clients = &list;
+                    write(pipe_write_fd, &inf, sizeof(inf));//записываем задание в канал
                 }
 
                 /*if (events[n].events & EPOLLOUT)
@@ -243,25 +364,105 @@ int main()
                 }*/
 
                 if (events[n].events & EPOLLRDHUP)//Клиент закрыл соединение на своей стороне, удаляем сокет
-                {                    
+                {
                     epoll_ctl(efd, EPOLL_CTL_DEL, fd, &connev);
                     --events_count;
                     close(fd);
-                    clients.erase(fd);
+                    RemoveFromList(&list, fd);
                     continue;
                 }
             }
         }
     }
+    printf("Creating finish tasks\n");
+
+    for(i=0; i<threads_count; i++)
+    {
+        struct Task task;
+        task.finish = true;
+        //pthread_mutex_lock(&mutex);
+        write(pipe_write_fd, &task, sizeof(task));//записываем задание в канал
+        //pthread_mutex_unlock(&mutex);
+    }
+    printf("Finish tasks created\n");
+
 
     void *status;
+
     for(i=0; i<threads_count; i++)//Waiting for threads
     {
         pthread_join(threads[i], &status);
     }
+    printf("All threads joined\n");
+
+    pthread_mutex_lock(&mutex);
+    struct ListElement *element = list.first;
+    while(element != NULL)
+    {
+        int fd = element->value;
+        epoll_ctl(efd, EPOLL_CTL_DEL, fd, &connev);
+        --events_count;
+        close(fd);
+        element = element->next;
+    }
+    pthread_mutex_unlock(&mutex);
+    close(listenfd);
+    printf("All sockets closed\n");
+
+    close(pipe_read_fd);
+    close(pipe_write_fd);
+
     free(threads);
 
+    ClearList(&list);
+
+    printf ("Server stoped\n");
+
+    return NULL;
+}
+
+
+int main(int argc, char *argv[])
+{
+    pthread_mutex_init(&mutex, NULL);
+    pthread_mutex_init(&pipe_mutex, NULL);
+
+    struct ServerData data;
+    bool finish = false;
+    bool inf_mode = false;
+    data.finish = &finish;
+    data.inf_mode = &inf_mode;
+    data.threads_count = atoi(argv[1]);
+
+    pthread_t thread;
+    int error = pthread_create(&thread, NULL, Server, (void*)(&data));
+
+    if(error)
+        printf("Server thread creation error!\n");
+
+    while(!finish)
+    {
+        char command[5];
+        char *pos;
+        fgets(command, sizeof(command), stdin);
+        if ((pos = strchr(command, '\n')) != NULL)
+            *pos = '\0';
+        if(strcmp(command, "stop") == 0)
+        {
+            finish = true;
+        }
+        else if(strcmp(command, "inf") == 0)
+        {
+            inf_mode = !inf_mode;
+        }
+    }
+
+    void *status;
+    pthread_join(thread, &status);
+
+
     pthread_mutex_destroy(&mutex);
+    pthread_mutex_destroy(&pipe_mutex);
 
     return 0;
 }
