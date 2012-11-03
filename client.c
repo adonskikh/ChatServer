@@ -6,23 +6,10 @@
 #include<pthread.h>
 #include<stdbool.h>
 #include <fcntl.h>
-
-#define NAME_LENGTH 32
-#define MESSAGE_LENGTH 1024
-
-struct Message
-{
-    char sender[NAME_LENGTH];
-    char text[MESSAGE_LENGTH];
-    char text1[32000];
-    char text2[30000];
-    /*char text3[32000];
-    char text4[32000];
-    char text5[32000];
-    char text6[32000];
-    char text7[32000];
-    char text8[32000];*/
-};
+#include <time.h>
+#include <errno.h>
+#include <string.h>
+#include "common.h"
 
 struct Inf
 {
@@ -30,7 +17,7 @@ struct Inf
     bool *finish;
 };
 
-//char buf[sizeof(text)];
+int message_count;
 
 void* Reader(void *data)
 {
@@ -38,40 +25,92 @@ void* Reader(void *data)
     struct Message message;
     while(!(*(inf.finish)))
     {
+//        char buf[sizeof(message)];
+//        int bytes_read = 0;
+//        int bytes_left = sizeof(message);
+
+//        while(bytes_left > 0/* && !(*(inf.finish))*/)
+//        {
+//            int bytes = recv(inf.socket, buf + bytes_read, bytes_left, 0);
+//            if(bytes > 0)
+//            {
+//                bytes_read += bytes;
+//                bytes_left -= bytes;
+//                printf("bytes_read: %d bytes_left: %d\n", bytes_read, bytes_left);
+//            }
+//            else if(bytes == 0) // Соединение разорвано
+//            {
+//                printf("Server closed connection.\n");
+//                (*(inf.finish)) = true;
+//                break;
+//            }
+//        }
+
+//        if (bytes_left > 0)
+//        {
+//            continue;
+//        }
+
+//        printf("buf = %s\n", buf);
+//        message = *((struct Message *)(buf));
+
+//        time_t curr_time = time(NULL);
+//        struct tm *timeinfo;
+//        timeinfo = localtime ( &curr_time );
+//        printf ( "Current local time and date: %s",  asctime (timeinfo));
+
+//        printf("[%s]: %s\nDelay = %d\n", message.sender, message.text, (int)(0/*curr_time - message.send_time*/));
+
+
+
         char buf[sizeof(message)];
         int bytes_read = 0;
         int bytes_left = sizeof(message);
 
         while(bytes_left > 0 && !(*(inf.finish)))
         {
-            int bytes = recv(inf.socket, buf + bytes_read, bytes_left, 0);
+            int bytes = recv(inf.socket, buf + bytes_read, bytes_left, MSG_WAITALL | MSG_DONTWAIT);
             if(bytes > 0)
             {
                 bytes_read += bytes;
                 bytes_left -= bytes;
-                printf("bytes_read: %d bytes_left: %d\n", bytes_read, bytes_left);
+                //printf("%d bytes_read: %d bytes_left: %d\n", getpid(), bytes_read, bytes_left);
+            }
+            else if(bytes == 0)
+            {
+                printf("Server closed connection.\n");
+                (*(inf.finish)) = true;
+                break;
             }
         }
 
-        if (bytes_left > 0)
+        if (bytes_read < sizeof(message))
         {
             continue;
         }
 
-        message = *((struct Message *)(buf));
+        if(!(*(inf.finish)))
+        {
+            message = *((struct Message *)(buf));
+            time_t curr_time = time(NULL);
+            struct tm *timeinfo;
+            timeinfo = localtime ( &curr_time );
+            //printf ( "Current local time and date: %s",  asctime (timeinfo));
 
-        printf("[%s]: %s\n", message.sender, message.text);
+            //printf("[%s->%d, delay = %d sec]: %s\n", message.sender, getpid(), (int)(curr_time - message.send_time), message.text);
+
+        }
+
     }
     pthread_exit(NULL);
 }
 
-int main(int argc, char *argv[])
+int Sender(int sock, int count, int sleep_time)
 {
     int i = 0;
-    int sock;
     struct sockaddr_in addr;
 
-    sock = socket(AF_INET, SOCK_STREAM, 0);
+    //printf("sock = %d\n", sock);
     if(sock < 0)
     {
         perror("socket");
@@ -99,11 +138,12 @@ int main(int argc, char *argv[])
     if(pthread_create(&thr, NULL, Reader, (void*)(&inf)))
         printf("Thread creation error!\n");
 
+    sleep(rand()%10);
 
-    int count = atoi(argv[1]);
-    while(i < count)
+    //int count = atoi(argv[1]);
+    while(i < count && !finish)
     {
-        sleep(5);
+        sleep(sleep_time);
         struct Message message;
         int size;
         size = sprintf(message.text, "%s", "Hello! This is ");
@@ -112,26 +152,88 @@ int main(int argc, char *argv[])
 
         size = sprintf(message.sender, "%i", getpid());
 
+        message.send_time = time(NULL);
+        int bytes;
+        int bytes_sent = 0;
 
-        printf(">Process sending message: %s<\n", message.text);
-        int n = send(sock, &message, sizeof(message), 0);
-
-        if (n == 0)
+        while(bytes_sent < sizeof(message) && !finish)
         {
-            printf("Server closed connection\n");
-            break;
+            //printf("%d writing to %d\n", id, element->value);
+            bytes = send(sock, &(message) + bytes_sent, sizeof(message) - bytes_sent, MSG_NOSIGNAL);
+            //printf("%d wrote\n", id);
+            if(bytes > 0)
+            {
+                bytes_sent+=bytes;
+                //printf("bytes_sent = %d\n", bytes_sent);
+            }
+//            else
+//            {
+
+//                if(bytes == 0 || errno == EFAULT /*|| errno == EPIPE*/) // Соединение разорвано
+//                {
+//                    //close(task.clientfd);
+//                    //perror("send");
+//                    //element = element->next;
+//                    //printf("Removing %d!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11\n", task.clientfd);
+//                    //RemoveFromList(task.clients, task.clientfd);
+//                    break;
+//                    //continue;
+//                }
+//                if(bytes<0 && errno != EAGAIN)
+//                {
+//                    //element = element->next;
+//                    //perror("send");
+//                    break;
+//                }
+//            }
         }
+        //bytes = send(sock, &message, sizeof(message), MSG_NOSIGNAL);
+        //printf("sent_bytes: %d\n", n);
+
+//        if (bytes == 0)
+//        {
+//            printf("Server closed connection\n");
+//            break;
+//        }
 
         i++;
+        message_count++;
     }
 
     finish = true;
     void *status;
+    //printf("Joining reader\n");
     pthread_join(thr, &status);
-
+    //printf("Joined reader\n");
+    printf("%d sent %d messages.\n", getpid(), message_count);
     close(sock);
 
+    return 0;
+}
 
+int main(int argc, char *argv[])
+{
+    int proc_count = atoi(argv[3]);
+    int j;
+    int processes[proc_count];
+    printf("proc_count = %d\n", proc_count);
+    for(j = 0; j < proc_count; j++)
+    {
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        processes[j] = fork();
+        if (processes[j] == 0)
+        {
+            Sender(sock, atoi(argv[1]), atoi(argv[2]));
+            exit(0);
+        }
+    }
+
+    int status;
+    for(j=0; j<proc_count; j++)//Waiting for processes
+    {
+        waitpid(processes[j], status, 0);
+        //printf("Process %d finished!\n", j);
+    }
 
     return 0;
 }

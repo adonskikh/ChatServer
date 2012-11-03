@@ -7,16 +7,16 @@
 #include<stdbool.h>
 #include <fcntl.h>
 #include <string.h>
+#include <time.h>
+#include "common.h"
 
-#define NAME_LENGTH 32
-#define MESSAGE_LENGTH 1024
-
-struct Message
+struct QUEUE_TYPE
 {
     char sender[NAME_LENGTH];
     char text[MESSAGE_LENGTH];
+    time_t send_time;/*
     char text1[32000];
-    char text2[30000];
+    char text2[30000];*/
     /*char text3[32000];
     char text4[32000];
     char text5[32000];
@@ -25,6 +25,9 @@ struct Message
     char text8[32000];*/
 };
 
+#include "queue.h"
+
+
 struct Inf
 {
     int socket;
@@ -32,66 +35,7 @@ struct Inf
     bool *paused;
 };
 
-struct QueueElement
-{
-    struct Message message;
-    struct QueueElement *next;
-};
-
-struct Queue
-{
-    int count;
-    struct QueueElement *first;
-    struct QueueElement *last;
-};
-
-bool QueueIsEmpty(struct Queue *queue)
-{
-    return((queue->count) < 1);
-}
-
-void AddToQueue(struct Queue *queue, struct Message message)
-{
-    struct QueueElement *element = malloc(sizeof(struct QueueElement));
-    element->message = message;
-    element->next = NULL;
-    if(QueueIsEmpty(queue))
-    {
-        queue->first = element;
-        queue->last = element;
-    }
-    else
-    {
-        queue->last->next = element;
-        queue->last = element;
-    }
-    (queue->count)++;
-}
-
-struct Message GetFromQueue(struct Queue *queue)
-{
-    if(!QueueIsEmpty(queue))
-    {
-        struct QueueElement *element;
-        element = queue->first;
-        queue->first = element->next;
-        (queue->count)--;
-        struct Message message = element->message;
-        free(element);
-        return message;
-    }
-    else
-    {
-        printf("Queue is empty!\n");
-        exit(-1);
-    }
-}
-void InitializeQueue(struct Queue *queue)
-{
-    queue->count = 0;
-    queue->first = NULL;
-    queue->last = NULL;
-}
+int message_count;
 
 
 void* Reader(void *data)
@@ -113,8 +57,13 @@ void* Reader(void *data)
                 //printf("q_count = %d!\n", queue.count);
                 while(!(QueueIsEmpty(&queue)))
                 {
-                    struct Message mes = GetFromQueue(&queue);
-                    printf("[%s]: %s\n", mes.sender, mes.text);
+                    struct QUEUE_TYPE mes = GetFromQueue(&queue);
+                    time_t curr_time = time(NULL);
+                    struct tm *timeinfo;
+                    timeinfo = localtime ( &curr_time );
+                    //printf ( "Current local time and date: %s",  asctime (timeinfo));
+
+                    printf("[#%d][%s]: %s [delay = %d sec]\n", ++message_count, mes.sender, mes.text, (int)(curr_time - mes.send_time));
                 }
             }
             int bytes = recv(inf.socket, buf + bytes_read, bytes_left, 0);
@@ -141,12 +90,17 @@ void* Reader(void *data)
 
         if(!(*(inf.paused)))
         {
-            printf("[%s]: %s\n", message.sender, message.text);
+            time_t curr_time = time(NULL);
+            struct tm *timeinfo;
+            timeinfo = localtime ( &curr_time );
+            //printf ( "Current local time and date: %s",  asctime (timeinfo));
+
+            printf("[#%d][%s]: %s [delay = %d sec]\n", ++message_count, message.sender, message.text, (int)(curr_time - message.send_time));
         }
         else
         {
             //printf("Adding message\n");
-            AddToQueue(&queue, message);
+            AddToQueue(&queue, *((struct QUEUE_TYPE*)(&message)));
         }
     }
     pthread_exit(NULL);
@@ -210,6 +164,7 @@ int main(/*int argc, char *argv[]*/)
             fgets(message.text, sizeof(message.text), stdin);
             if ((pos = strchr(message.text, '\n')) != NULL)
                 *pos = '\0';
+            message.send_time = time(NULL);
 
             //printf(">Process sending message: %s<\n", message.text);
             int n = send(sock, &message, sizeof(message), 0);
@@ -232,7 +187,7 @@ int main(/*int argc, char *argv[]*/)
                 *pos = '\0';
             paused = true;
             printf("[paused]");
-            if(strcmp(command, "stop") == 0)
+            if(strcmp(command, "x") == 0)
             {
                 finish = true;
             }
@@ -243,8 +198,6 @@ int main(/*int argc, char *argv[]*/)
     pthread_join(thr, &status);
 
     close(sock);
-
-
 
     return 0;
 }
