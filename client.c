@@ -25,44 +25,6 @@ void* Reader(void *data)
     struct Message message;
     while(!(*(inf.finish)))
     {
-//        char buf[sizeof(message)];
-//        int bytes_read = 0;
-//        int bytes_left = sizeof(message);
-
-//        while(bytes_left > 0/* && !(*(inf.finish))*/)
-//        {
-//            int bytes = recv(inf.socket, buf + bytes_read, bytes_left, 0);
-//            if(bytes > 0)
-//            {
-//                bytes_read += bytes;
-//                bytes_left -= bytes;
-//                printf("bytes_read: %d bytes_left: %d\n", bytes_read, bytes_left);
-//            }
-//            else if(bytes == 0) // Соединение разорвано
-//            {
-//                printf("Server closed connection.\n");
-//                (*(inf.finish)) = true;
-//                break;
-//            }
-//        }
-
-//        if (bytes_left > 0)
-//        {
-//            continue;
-//        }
-
-//        printf("buf = %s\n", buf);
-//        message = *((struct Message *)(buf));
-
-//        time_t curr_time = time(NULL);
-//        struct tm *timeinfo;
-//        timeinfo = localtime ( &curr_time );
-//        printf ( "Current local time and date: %s",  asctime (timeinfo));
-
-//        printf("[%s]: %s\nDelay = %d\n", message.sender, message.text, (int)(0/*curr_time - message.send_time*/));
-
-
-
         char buf[sizeof(message)];
         int bytes_read = 0;
         int bytes_left = sizeof(message);
@@ -97,7 +59,7 @@ void* Reader(void *data)
             timeinfo = localtime ( &curr_time );
             //printf ( "Current local time and date: %s",  asctime (timeinfo));
 
-            //printf("[%s->%d, delay = %d sec]: %s\n", message.sender, getpid(), (int)(curr_time - message.send_time), message.text);
+            printf("[%s->%d, delay = %d sec]: %s\n", message.sender, getpid(), (int)(curr_time - message.send_time), message.text);
 
         }
 
@@ -166,35 +128,7 @@ int Sender(int sock, int count, int sleep_time)
                 bytes_sent+=bytes;
                 //printf("bytes_sent = %d\n", bytes_sent);
             }
-//            else
-//            {
-
-//                if(bytes == 0 || errno == EFAULT /*|| errno == EPIPE*/) // Соединение разорвано
-//                {
-//                    //close(task.clientfd);
-//                    //perror("send");
-//                    //element = element->next;
-//                    //printf("Removing %d!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11\n", task.clientfd);
-//                    //RemoveFromList(task.clients, task.clientfd);
-//                    break;
-//                    //continue;
-//                }
-//                if(bytes<0 && errno != EAGAIN)
-//                {
-//                    //element = element->next;
-//                    //perror("send");
-//                    break;
-//                }
-//            }
         }
-        //bytes = send(sock, &message, sizeof(message), MSG_NOSIGNAL);
-        //printf("sent_bytes: %d\n", n);
-
-//        if (bytes == 0)
-//        {
-//            printf("Server closed connection\n");
-//            break;
-//        }
 
         i++;
         message_count++;

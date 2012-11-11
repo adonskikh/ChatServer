@@ -1,0 +1,6 @@
+	push	%ebp
+	mov	%esp, %ebp
+	and	$-16, %esp
+	sub	$16, %esp
+	mov	$0, (%esp)
+	call	exit
